@@ -61,7 +61,7 @@ def generate_artifacts():
     run(cmd_args, check=True)
 
 
-def file_starts_with(file_name, pattern):
+def assert_file_starts_with(file_name, pattern):
     with open(file_name, "r") as fin:
         first_line = fin.readline()
         res = first_line.startswith(pattern)

@@ -4,10 +4,12 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <random>
 
 namespace vkcom {
 
 const uint32_t SPACE_TOKEN = 9601;
+const uint32_t DEFAULT_SEED = std::mt19937::default_seed;
 
 struct SpecialTokens {
   int pad_id = -1;
@@ -81,13 +83,6 @@ struct MergeCandidate {
 struct DecodeResult {
   std::vector<int> ids;
   std::vector<std::string> pieces;
-};
-
-struct EncodingConfig {
-  bool bos;
-  bool eos;
-  bool reverse;
-  double dropout_prob;
 };
 
 bool is_space(uint32_t ch);

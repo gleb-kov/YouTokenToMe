@@ -4,12 +4,9 @@ import random
 import youtokentome as yttm
 from utils_for_testing import (
     BASE_MODEL_FILE,
-    RENAME_ID_MODEL_FILE,
-    TEST_FILE,
     TRAIN_FILE,
     BOS_ID,
     EOS_ID,
-    file_starts_with,
     generate_artifacts,
 )
 
@@ -49,3 +46,24 @@ def test_vocabulary_consistency():
     for i, subword in enumerate(vc):
         assert i == bpe.subword_to_id(subword)
         assert subword == bpe.id_to_subword(i)
+
+
+def test_dropout():
+    train_text = "h e l o w o r l d hello world"
+    test_text = "hello world"
+    TRAIN_DATA_PATH = "train_data.txt"
+    MODEL_PATH = "model.yttm"
+    with open(TRAIN_DATA_PATH, "w") as fin:
+        fin.write(train_text)
+    model = yttm.BPE.train(TRAIN_DATA_PATH, MODEL_PATH, 100)
+
+    tokenized_text = model.encode([test_text], output_type=yttm.OutputType.SUBWORD, dropout_prob=0.0)
+    expected_result = [["▁hello", "▁world"]]
+    assert tokenized_text == expected_result
+
+    tokenized_text = model.encode([test_text], output_type=yttm.OutputType.SUBWORD, dropout_prob=1.0)
+    expected_result = [["▁" , "h", "e", "l", "l", "o", "▁", "w", "o", "r", "l", "d"]]
+    assert tokenized_text == expected_result
+
+    os.remove(TRAIN_DATA_PATH)
+    os.remove(MODEL_PATH)

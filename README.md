@@ -121,6 +121,7 @@ encode(self, sentences, output_type=yttm.OutputType.ID, bos=False, eos=False, re
 * `eos`: bool, if True then token “end of sentence” will be added
 * `reverse`: bool, if True the output sequence of tokens will be reversed
 * `dropout_prob`: float, BPE-dropout probability (the probability of a merge being dropped). Must be in the range [0, 1].
+* `dropout_seed`: int, BPE-dropout seed for random engine. Must be in the range [0, 2^31 - 1].
 
   
 **Returns:** If `output_type` is equal to `youtokentome.OutputType.ID` or `youtokentome.OutputType.SUBWORD` 
@@ -262,7 +263,8 @@ Options:
   --eos                Add tab 'end of sentence'.
   --reverse            Reverse output sequence of tokens.
   --stream             Process each line before reading the next one.
-  --dropout_prob       BPE-dropout probability (the probability of a merge being dropped). [default: 0]
+  --dropout_prob       BPE-dropout probability (the probability of a merge being dropped). Must be in the range [0, 1]. [default: 0]
+  --dropout_seed       BPE-dropout seed for random engine. Must be in the range [0, 2^31 - 1]. [default: 5489]
   --help               Show this message and exit.
 ```
 

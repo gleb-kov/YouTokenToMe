@@ -15,20 +15,20 @@ const std::string EOS_TOKEN = "<EOS>";
 
 enum OutputType { ID, SUBWORD };
 
-struct BpeConfig {
+struct BpeTrainConfig {
   double character_coverage = 1;
   int n_threads = 0;
   SpecialTokens special_tokens;
 
-  BpeConfig() = default;
+  BpeTrainConfig() = default;
 
-  BpeConfig(double character_coverage, int n_threads, const SpecialTokens &special_tokens);
+  BpeTrainConfig(double character_coverage, int n_threads, const SpecialTokens &special_tokens);
 };
 
 Status train_bpe(const std::string &input_path,
                  const std::string &model_path,
                  int vocab_size,
-                 BpeConfig config);
+                 BpeTrainConfig config);
 
 struct BpeState {
   flat_hash_map<uint32_t, uint32_t> char2id;
@@ -40,7 +40,15 @@ struct BpeState {
   Status load(const std::string &file_name);
 };
 
-class BaseEncoder {
+struct BpeEncodingConfig {
+  bool bos = false;
+  bool eos = false;
+  bool reverse = false;
+  double dropout_prob = 0;
+  uint32_t dropout_seed = DEFAULT_SEED;
+};
+
+class BpeModel {
  public:
   BpeState bpe_state;
   flat_hash_map<uint32_t, uint32_t> id2char;
@@ -49,23 +57,17 @@ class BaseEncoder {
   flat_hash_map<uint64_t, int> rule2id;
   int n_threads;
 
-  explicit BaseEncoder(BpeState bpe_state, int n_threads);
+  explicit BpeModel(BpeState bpe_state, int n_threads);
 
-  explicit BaseEncoder(const std::string &model_path, int n_threads, Status *ret_status);
+  explicit BpeModel(const std::string &model_path, int n_threads, Status *ret_status);
 
   Status encode_as_ids(const std::vector<std::string> &sentences,
                        std::vector<std::vector<int>> *ids,
-                       bool bos = false,
-                       bool eos = false,
-                       bool reverse = false,
-                       double dropout_prob = 0) const;
+                       BpeEncodingConfig config) const;
 
   Status encode_as_subwords(const std::vector<std::string> &sentences,
                             std::vector<std::vector<std::string>> *subwords,
-                            bool bos = false,
-                            bool eos = false,
-                            bool reverse = false,
-                            double dropout_prob = 0) const;
+                            BpeEncodingConfig config) const;
 
   Status id_to_subword(int id, std::string *subword, bool replace_space = false) const;
 
@@ -87,12 +89,7 @@ class BaseEncoder {
 
   std::vector<std::string> vocabulary() const;
 
-  Status encode_cli(const std::string &output_type,
-                    bool stream,
-                    bool bos = false,
-                    bool eos = false,
-                    bool reverse = false,
-                    double dropout_prob = 0) const;
+  Status encode_cli(const std::string &output_type, bool stream, BpeEncodingConfig config) const;
 
   Status decode_cli(const std::unordered_set<int> *ignore_ids) const;
 
@@ -102,11 +99,11 @@ class BaseEncoder {
   void fill_from_state();
 
   DecodeResult encode_sentence(const std::string &sentence_utf8,
-                               const EncodingConfig &encoding_config,
+                               const BpeEncodingConfig &encoding_config,
                                OutputType output_type) const;
 
   Status encode_parallel(const std::vector<std::string> &sentences,
-                         const EncodingConfig &encoding_config,
+                         const BpeEncodingConfig &encoding_config,
                          OutputType output_type,
                          std::vector<DecodeResult> *decoder_results) const;
 };

@@ -5,8 +5,8 @@
 #include <cassert>
 #include <condition_variable>
 #include <cstring>
-#include <functional>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <queue>
@@ -106,11 +106,10 @@ Status BpeState::load(const std::string &file_name) {
   return Status();
 }
 
-BpeConfig::BpeConfig(double character_coverage,
-                     int n_threads,
-                     const SpecialTokens &special_tokens)
- : character_coverage(character_coverage), n_threads(n_threads), special_tokens(special_tokens) {
-}
+BpeTrainConfig::BpeTrainConfig(double character_coverage,
+                               int n_threads,
+                               const SpecialTokens &special_tokens)
+ : character_coverage(character_coverage), n_threads(n_threads), special_tokens(special_tokens) {}
 
 Status fast_read_file_utf8(const std::string &file_name, std::string *file_content) {
   static const int buf_size = 1000000;
@@ -324,7 +323,7 @@ flat_hash_map<uint32_t, uint32_t>
 compute_alphabet_helper(const flat_hash_map<uint32_t, uint64_t> &char_cnt,
                         uint64_t data_len,
                         flat_hash_set<uint32_t> &removed_chars,
-                        const BpeConfig &bpe_config) {
+                        const BpeTrainConfig &bpe_config) {
   std::vector<std::pair<uint64_t, uint32_t>> frequencies;
 
   for (auto x : char_cnt) {
@@ -502,7 +501,7 @@ void worker_doing_merge(
         std::vector<std::vector<flat_hash_map<uint32_t, uint64_t>>> &right_tokens_submit,
         std::atomic<uint32_t> &real_n_tokens,
         std::vector<std::atomic<uint32_t>> &results_ready,
-        const BpeConfig &bpe_config,
+        const BpeTrainConfig &bpe_config,
         std::mutex &main_loop_mt,
         std::condition_variable &main_loop_cv) {
   auto &pair2cnt = pair2cnt_g[thread_id];
@@ -855,7 +854,7 @@ uint64_t compute_char_count(flat_hash_map<uint32_t, uint64_t> &char_cnt, char *b
 Status learn_bpe_from_string(std::string &text_utf8,
                              int n_tokens,
                              const std::string &output_file,
-                             BpeConfig bpe_config,
+                             BpeTrainConfig bpe_config,
                              BpeState *bpe_state) {
   assert(bpe_config.n_threads >= 1 || bpe_config.n_threads == -1);
   uint64_t n_threads = bpe_config.n_threads;
@@ -1135,8 +1134,7 @@ Status learn_bpe_from_string(std::string &text_utf8,
     assert(finished_cur <= used_ids && used_ids <= finished_cur + 2);
     bool progress = false;
 
-    if (used_ids < n_tokens && used_ids - finished_cur < 2
-        && last_failed_try < finished_cur) {
+    if (used_ids < n_tokens && used_ids - finished_cur < 2 && last_failed_try < finished_cur) {
       progress = true;
       for (uint64_t i = 0; i < n_threads; i++) {
         thread_use_hs[i] = false;
@@ -1298,7 +1296,7 @@ Status learn_bpe_from_string(std::string &text_utf8,
   return Status();
 }
 
-Status check_config(BpeConfig &bpe_config, int vocab_size) {
+Status check_config(BpeTrainConfig &bpe_config, int vocab_size) {
   if (bpe_config.character_coverage <= 0 || bpe_config.character_coverage > 1) {
     return Status(1,
                   "coverage value must be in the range (0, 1]. Current value of coverage = "
@@ -1362,7 +1360,7 @@ Status check_config(BpeConfig &bpe_config, int vocab_size) {
 void print_config(const std::string &input_path,
                   const std::string &model_path,
                   int vocab_size,
-                  BpeConfig bpe_config) {
+                  BpeTrainConfig bpe_config) {
   std::cerr << "Training parameters" << std::endl;
   std::cerr << "  input: " << input_path << std::endl;
   std::cerr << "  model: " << model_path << std::endl;
@@ -1379,7 +1377,7 @@ void print_config(const std::string &input_path,
 Status train_bpe(const std::string &input_path,
                  const std::string &model_path,
                  int vocab_size,
-                 BpeConfig bpe_config) {
+                 BpeTrainConfig bpe_config) {
   Status status = check_config(bpe_config, vocab_size);
   if (!status.ok()) {
     return status;
@@ -1424,15 +1422,16 @@ class STLQueue : public BasePriorityQueue<T> {
 
 template <typename T>
 class DropoutQueue : public BasePriorityQueue<T> {
-  double skip_prob;
+ private:
+  const double skip_prob;
   std::uniform_real_distribution<> dist;
   std::priority_queue<T> q;
   std::vector<T> skipped_elements;
-  std::mt19937 rnd{};
+  std::mt19937 rnd;
 
  public:
-  explicit DropoutQueue(double skip_prob)
-   : skip_prob(skip_prob), dist(std::uniform_real_distribution<>(0, 1)) {}
+  DropoutQueue(double skip_prob, uint32_t seed)
+   : skip_prob(skip_prob), dist(std::uniform_real_distribution<>(0, 1)), rnd(seed) {}
   void push(T x) override { q.push(x); }
   bool pop(T &x) override {
     assert(skipped_elements.empty());
@@ -1460,9 +1459,9 @@ class DropoutQueue : public BasePriorityQueue<T> {
   }
 };
 
-DecodeResult BaseEncoder::encode_sentence(const std::string &sentence_utf8,
-                                          const EncodingConfig &encoding_config,
-                                          OutputType output_type) const {
+DecodeResult BpeModel::encode_sentence(const std::string &sentence_utf8,
+                                       const BpeEncodingConfig &encoding_config,
+                                       OutputType output_type) const {
   struct NodeDecoder {
     uint32_t token_id;
     int prev, next;
@@ -1544,7 +1543,8 @@ DecodeResult BaseEncoder::encode_sentence(const std::string &sentence_utf8,
     if (encoding_config.dropout_prob == 0) {
       queue.reset(new STLQueue<MergeEvent2>());
     } else {
-      queue.reset(new DropoutQueue<MergeEvent2>(encoding_config.dropout_prob));
+      queue.reset(new DropoutQueue<MergeEvent2>(encoding_config.dropout_prob,
+                                                encoding_config.dropout_seed));
     }
 
     auto push_in_queue_if_rule_exist = [&](uint64_t pos) {
@@ -1632,16 +1632,16 @@ DecodeResult BaseEncoder::encode_sentence(const std::string &sentence_utf8,
   return {output_ids, output_pieces};
 }
 
-BaseEncoder::BaseEncoder(BpeState bpe_state, int n_threads)
+BpeModel::BpeModel(BpeState bpe_state, int n_threads)
  : bpe_state(std::move(bpe_state)), n_threads(n_threads) {
   fill_from_state();
   assert(n_threads >= 1 || n_threads == -1);
   if (n_threads == -1) {
-    n_threads = std::max(1, int(std::thread::hardware_concurrency()));
+    this->n_threads = std::max(1, int(std::thread::hardware_concurrency()));
   }
 }
 
-BaseEncoder::BaseEncoder(const std::string &model_path, int n_threads, Status *ret_status)
+BpeModel::BpeModel(const std::string &model_path, int n_threads, Status *ret_status)
  : n_threads(n_threads) {
   Status status = bpe_state.load(model_path);
   if (!status.ok()) {
@@ -1665,7 +1665,7 @@ std::vector<T> concat_vectors(const std::vector<T> &a, const std::vector<T> &b) 
   return c;
 }
 
-void BaseEncoder::fill_from_state() {
+void BpeModel::fill_from_state() {
   for (auto x : bpe_state.char2id) {
     id2char[x.second] = x.first;
   }
@@ -1689,15 +1689,15 @@ void BaseEncoder::fill_from_state() {
   reversed_recipe[EOS_TOKEN] = bpe_state.special_tokens.eos_id;
 }
 
-int BaseEncoder::vocab_size() const {
+int BpeModel::vocab_size() const {
   return bpe_state.rules.size() + bpe_state.char2id.size()
        + bpe_state.special_tokens.n_special_tokens();
 }
 
-Status BaseEncoder::encode_parallel(const std::vector<std::string> &sentences,
-                                    const EncodingConfig &encoding_config,
-                                    OutputType output_type,
-                                    std::vector<DecodeResult> *decoder_results) const {
+Status BpeModel::encode_parallel(const std::vector<std::string> &sentences,
+                                 const BpeEncodingConfig &encoding_config,
+                                 OutputType output_type,
+                                 std::vector<DecodeResult> *decoder_results) const {
   if (encoding_config.bos && bpe_state.special_tokens.bos_id == -1) {
     return Status(1, "Can't add <BOS> token. Model was trained without it.");
   }
@@ -1735,16 +1735,11 @@ Status BaseEncoder::encode_parallel(const std::vector<std::string> &sentences,
   return Status();
 }
 
-Status BaseEncoder::encode_as_ids(const std::vector<std::string> &sentences,
-                                  std::vector<std::vector<int>> *ids,
-                                  bool bos,
-                                  bool eos,
-                                  bool reverse,
-                                  double dropout_prob) const {
-  EncodingConfig encoding_config = {bos, eos, reverse, dropout_prob};
-
+Status BpeModel::encode_as_ids(const std::vector<std::string> &sentences,
+                               std::vector<std::vector<int>> *ids,
+                               BpeEncodingConfig config) const {
   std::vector<DecodeResult> decode_results;
-  Status status = encode_parallel(sentences, encoding_config, ID, &decode_results);
+  Status status = encode_parallel(sentences, config, ID, &decode_results);
   if (!status.ok()) {
     return status;
   }
@@ -1755,15 +1750,11 @@ Status BaseEncoder::encode_as_ids(const std::vector<std::string> &sentences,
   return Status();
 }
 
-Status BaseEncoder::encode_as_subwords(const std::vector<std::string> &sentences,
-                                       std::vector<std::vector<std::string>> *subwords,
-                                       bool bos,
-                                       bool eos,
-                                       bool reverse,
-                                       double dropout_prob) const {
-  EncodingConfig encoding_config = {bos, eos, reverse, dropout_prob};
+Status BpeModel::encode_as_subwords(const std::vector<std::string> &sentences,
+                                    std::vector<std::vector<std::string>> *subwords,
+                                    BpeEncodingConfig config) const {
   std::vector<DecodeResult> decode_results;
-  Status status = encode_parallel(sentences, encoding_config, SUBWORD, &decode_results);
+  Status status = encode_parallel(sentences, config, SUBWORD, &decode_results);
   if (!status.ok()) {
     return status;
   }
@@ -1774,7 +1765,7 @@ Status BaseEncoder::encode_as_subwords(const std::vector<std::string> &sentences
   return Status();
 }
 
-Status BaseEncoder::id_to_subword(int id, std::string *subword, bool replace_space) const {
+Status BpeModel::id_to_subword(int id, std::string *subword, bool replace_space) const {
   if (id < 0 || vocab_size() <= id) {
     return Status(1,
                   "id must be in the range [0, vocab_size - 1]. Current value: vocab_size = "
@@ -1809,7 +1800,7 @@ Status BaseEncoder::id_to_subword(int id, std::string *subword, bool replace_spa
   return Status();
 }
 
-int BaseEncoder::subword_to_id(const std::string &token) const {
+int BpeModel::subword_to_id(const std::string &token) const {
   if (UNK_TOKEN == token) {
     return bpe_state.special_tokens.unk_id;
   }
@@ -1829,9 +1820,9 @@ int BaseEncoder::subword_to_id(const std::string &token) const {
   return bpe_state.special_tokens.unk_id;
 }
 
-Status BaseEncoder::decode(const std::vector<std::vector<int>> &ids,
-                           std::vector<std::string> *sentences,
-                           const std::unordered_set<int> *ignore_ids) const {
+Status BpeModel::decode(const std::vector<std::vector<int>> &ids,
+                        std::vector<std::string> *sentences,
+                        const std::unordered_set<int> *ignore_ids) const {
   for (const std::vector<int> &sentence : ids) {
     std::string decode_output;
     Status status = decode(sentence, &decode_output, ignore_ids);
@@ -1843,9 +1834,9 @@ Status BaseEncoder::decode(const std::vector<std::vector<int>> &ids,
   return Status();
 }
 
-Status BaseEncoder::decode(const std::vector<int> &ids,
-                           std::string *sentence,
-                           const std::unordered_set<int> *ignore_ids) const {
+Status BpeModel::decode(const std::vector<int> &ids,
+                        std::string *sentence,
+                        const std::unordered_set<int> *ignore_ids) const {
   bool first_iter = true;
   for (int id : ids) {
     std::string subword;
@@ -1865,9 +1856,9 @@ Status BaseEncoder::decode(const std::vector<int> &ids,
   return Status();
 }
 
-Status BaseEncoder::decode(const std::vector<std::string> &data,
-                           std::vector<std::string> *sentences,
-                           const std::unordered_set<int> *ignore_ids) const {
+Status BpeModel::decode(const std::vector<std::string> &data,
+                        std::vector<std::string> *sentences,
+                        const std::unordered_set<int> *ignore_ids) const {
   for (const std::string &s : data) {
     std::stringstream stream;
     stream << s;
@@ -1886,7 +1877,7 @@ Status BaseEncoder::decode(const std::vector<std::string> &data,
   return Status();
 }
 
-std::vector<std::string> BaseEncoder::vocabulary() const {
+std::vector<std::string> BpeModel::vocabulary() const {
   int n = vocab_size();
   std::vector<std::string> vocab(n);
   for (int i = 0; i < n; i++) {
@@ -1898,7 +1889,7 @@ std::vector<std::string> BaseEncoder::vocabulary() const {
   return vocab;
 }
 
-void BaseEncoder::vocab_cli(bool verbose) const {
+void BpeModel::vocab_cli(bool verbose) const {
   uint32_t n_tokens = 0;
   for (const auto &entry : recipe) {
     n_tokens = std::max(entry.first, n_tokens);
@@ -1943,12 +1934,9 @@ void BaseEncoder::vocab_cli(bool verbose) const {
   }
 }
 
-Status BaseEncoder::encode_cli(const std::string &output_type_str,
-                               bool stream,
-                               bool bos,
-                               bool eos,
-                               bool reverse,
-                               double dropout_prob) const {
+Status BpeModel::encode_cli(const std::string &output_type_str,
+                            bool stream,
+                            BpeEncodingConfig config) const {
   std::ios_base::sync_with_stdio(false);
   OutputType output_type;
   if (output_type_str == "id") {
@@ -1962,7 +1950,7 @@ Status BaseEncoder::encode_cli(const std::string &output_type_str,
       std::string sentence;
       while (getline(std::cin, sentence)) {
         std::vector<std::vector<std::string>> subwords;
-        Status status = encode_as_subwords({sentence}, &subwords, bos, eos, reverse, dropout_prob);
+        Status status = encode_as_subwords({sentence}, &subwords, config);
         if (!status.ok()) {
           return status;
         }
@@ -1973,7 +1961,7 @@ Status BaseEncoder::encode_cli(const std::string &output_type_str,
       std::string sentence;
       while (getline(std::cin, sentence)) {
         std::vector<std::vector<int>> ids;
-        Status status = encode_as_ids({sentence}, &ids, bos, eos, reverse, dropout_prob);
+        Status status = encode_as_ids({sentence}, &ids, config);
         if (!status.ok()) {
           return status;
         }
@@ -1991,7 +1979,7 @@ Status BaseEncoder::encode_cli(const std::string &output_type_str,
       std::vector<std::string> sentences = read_lines_from_stdin(batch_limit, &processed);
       if (output_type == SUBWORD) {
         std::vector<std::vector<std::string>> subwords;
-        Status status = encode_as_subwords(sentences, &subwords, bos, eos, reverse, dropout_prob);
+        Status status = encode_as_subwords(sentences, &subwords, config);
         if (!status.ok()) {
           return status;
         }
@@ -1999,7 +1987,7 @@ Status BaseEncoder::encode_cli(const std::string &output_type_str,
       } else {
         assert(output_type == ID);
         std::vector<std::vector<int>> ids;
-        Status status = encode_as_ids(sentences, &ids, bos, eos, reverse, dropout_prob);
+        Status status = encode_as_ids(sentences, &ids, config);
         if (!status.ok()) {
           return status;
         }
@@ -2021,7 +2009,7 @@ Status BaseEncoder::encode_cli(const std::string &output_type_str,
   return Status();
 }
 
-Status BaseEncoder::decode_cli(const std::unordered_set<int> *ignore_ids) const {
+Status BpeModel::decode_cli(const std::unordered_set<int> *ignore_ids) const {
   std::ios_base::sync_with_stdio(false);
   std::string sentence;
   while (getline(std::cin, sentence)) {

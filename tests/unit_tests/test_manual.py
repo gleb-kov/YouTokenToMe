@@ -25,6 +25,7 @@ def test_russian():
     assert tokenized_text == expected_result
     print(tokenized_text)
     os.remove(TRAIN_DATA_PATH)
+    os.remove(MODEL_PATH)
 
 
 def test_english():
@@ -50,6 +51,7 @@ def test_english():
     assert tokenized_text == expected_result
     print(tokenized_text)
     os.remove(TRAIN_DATA_PATH)
+    os.remove(MODEL_PATH)
 
 
 def test_japanese():
@@ -73,3 +75,4 @@ def test_japanese():
     assert tokenized_text == expected_result
     print(tokenized_text)
     os.remove(TRAIN_DATA_PATH)
+    os.remove(MODEL_PATH)

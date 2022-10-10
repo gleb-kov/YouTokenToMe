@@ -42,7 +42,7 @@ double uniform_dist_double(mt19937 &rnd, double l, double r) {
 
 flat_hash_map<uint32_t, uint32_t> compute_alphabet(const std::vector<uint32_t> &data,
                                                    flat_hash_set<uint32_t> &removed_chars,
-                                                   const BpeConfig &bpe_config) {
+                                                   const BpeTrainConfig &bpe_config) {
   flat_hash_map<uint32_t, uint64_t> char_cnt;
   for (uint32_t ch : data) {
     if (!is_space(ch)) {
@@ -63,7 +63,7 @@ void remove_rare_chars(std::vector<uint32_t> &data, const flat_hash_set<uint32_t
   data.erase(it_first_rare_char, data.end());
 }
 
-BpeState learn_bpe_slow(const string &text_utf8, int n_token, BpeConfig bpe_config) {
+BpeState learn_bpe_slow(const string &text_utf8, int n_token, BpeTrainConfig bpe_config) {
   auto row_data = decode_utf8(text_utf8.data(), text_utf8.data() + text_utf8.size());
   vector<vector<uint32_t>> splited_text;
   for (auto &ch : row_data) {
@@ -194,12 +194,12 @@ BpeState learn_bpe_slow(const string &text_utf8, int n_token, BpeConfig bpe_conf
   return state;
 }
 
-DecodeResult decode_slow(const string &text_utf8, const BaseEncoder &bpe_applyer) {
+DecodeResult decode_slow(const string &text_utf8, const BpeModel &bpe_model) {
 
-  const auto &char2id = bpe_applyer.bpe_state.char2id;
-  const auto &id2char = bpe_applyer.id2char;
-  const auto &rules = bpe_applyer.bpe_state.rules;
-  const auto &recipe = bpe_applyer.recipe;
+  const auto &char2id = bpe_model.bpe_state.char2id;
+  const auto &id2char = bpe_model.id2char;
+  const auto &rules = bpe_model.bpe_state.rules;
+  const auto &recipe = bpe_model.recipe;
 
   auto text = decode_utf8(text_utf8.data(), text_utf8.data() + text_utf8.size());
   for (auto &ch : text) {
@@ -232,7 +232,7 @@ DecodeResult decode_slow(const string &text_utf8, const BaseEncoder &bpe_applyer
         int cur = i;
         for (; i < (int)text.size() && !is_space(text[i]) && char2id.count(text[i]) == 0; i++)
           ;
-        words.back().push_back({static_cast<uint32_t>(bpe_applyer.bpe_state.special_tokens.unk_id),
+        words.back().push_back({static_cast<uint32_t>(bpe_model.bpe_state.special_tokens.unk_id),
                                 encode_utf8({text.begin() + cur, text.begin() + i})});
       } else {
         words.back().push_back({char2id.at(text[i]), {}});
@@ -257,7 +257,7 @@ DecodeResult decode_slow(const string &text_utf8, const BaseEncoder &bpe_applyer
   for (auto &v : words) {
     for (const auto &u : v) {
       ids.push_back(u.val);
-      if (static_cast<long long>(u.val) == bpe_applyer.bpe_state.special_tokens.unk_id) {
+      if (static_cast<long long>(u.val) == bpe_model.bpe_state.special_tokens.unk_id) {
         pieces.push_back(u.new_chars);
       } else {
         auto recipe_u = recipe.at(u.val);
@@ -321,7 +321,7 @@ void manual_test() {
 
   auto trn_data_copy = trn_data;
   SpecialTokens special_tokens_config = {0, 1, 2, 3};
-  BpeConfig bpe_config = {1.0, 1, special_tokens_config};
+  BpeTrainConfig bpe_config = {1.0, 1, special_tokens_config};
 
   BpeState model_fast;
   status = learn_bpe_from_string(trn_data_copy, n_tokens, "remove_it.txt", bpe_config, &model_fast);
@@ -330,12 +330,12 @@ void manual_test() {
   assert(model_fast.rules == model_slow.rules);
   assert(model_fast.char2id == model_slow.char2id);
 
-  BaseEncoder applyer(model_fast, 1);
+  BpeModel model(model_fast, 1);
   vector<vector<int>> ids_tmp;
-  status = applyer.encode_as_ids({inf_data}, &ids_tmp);
+  status = model.encode_as_ids({inf_data}, &ids_tmp, BpeEncodingConfig());
   assert(status.ok());
   auto ids = ids_tmp[0];
-  auto result_slow = decode_slow(inf_data, applyer);
+  auto result_slow = decode_slow(inf_data, model);
   assert(ids == result_slow.ids);
 }
 
@@ -371,7 +371,7 @@ void parallel_test(int n_iter, int n_threads) {
     }
 
     auto train_data_copy = train_data;
-    BpeConfig bpe_config = {character_coverage, n_threads, {0, 1, 2, 3}};
+    BpeTrainConfig bpe_config = {character_coverage, n_threads, {0, 1, 2, 3}};
     BpeState learned_model;
     status = learn_bpe_from_string(train_data_copy,
                                    vocab_size,
@@ -379,17 +379,17 @@ void parallel_test(int n_iter, int n_threads) {
                                    bpe_config,
                                    &learned_model);
     assert(status.ok());
-    BaseEncoder applyer(learned_model, 20);
+    BpeModel model(learned_model, 20);
 
     vector<vector<string>> result_sentence_by_sentence;
     for (auto s : inference_data) {
       vector<vector<string>> encoded_subwords;
-      status = applyer.encode_as_subwords({s}, &encoded_subwords);
+      status = model.encode_as_subwords({s}, &encoded_subwords, BpeEncodingConfig());
       assert(status.ok());
       result_sentence_by_sentence.push_back(encoded_subwords[0]);
     }
     vector<vector<string>> result_parallel;
-    status = applyer.encode_as_subwords(inference_data, &result_parallel);
+    status = model.encode_as_subwords(inference_data, &result_parallel, BpeEncodingConfig());
     assert(status.ok());
     assert(result_sentence_by_sentence == result_parallel);
   }
@@ -419,7 +419,7 @@ void base_stress(int n_iter) {
       character_coverage = 1;
     }
     auto train_data_copy = train_data;
-    BpeConfig bpe_config = {character_coverage, n_threads, {0, 1, 2, 3}};
+    BpeTrainConfig bpe_config = {character_coverage, n_threads, {0, 1, 2, 3}};
     BpeState fast_solution_model;
     status = learn_bpe_from_string(train_data_copy,
                                    vocab_size,
@@ -446,19 +446,19 @@ void base_stress(int n_iter) {
     assert(fast_solution_model.rules == slow_solution_model.rules);
     assert(fast_solution_model.char2id == slow_solution_model.char2id);
 
-    BaseEncoder applyer(fast_solution_model, 1);
+    BpeModel model(fast_solution_model, 1);
 
     auto inference_data = generate_text(test_size, false, rnd);
     cerr << "inference_data: " << inference_data << endl;
     vector<vector<int>> fast_ids_tmp;
-    status = applyer.encode_as_ids({inference_data}, &fast_ids_tmp);
+    status = model.encode_as_ids({inference_data}, &fast_ids_tmp, BpeEncodingConfig());
     auto fast_ids = fast_ids_tmp[0];
     assert(status.ok());
     vector<vector<string>> fast_pieces_tmp;
-    status = applyer.encode_as_subwords({inference_data}, &fast_pieces_tmp);
+    status = model.encode_as_subwords({inference_data}, &fast_pieces_tmp, BpeEncodingConfig());
     assert(status.ok());
     auto fast_pieces = fast_pieces_tmp[0];
-    auto slow_results = decode_slow(inference_data, applyer);
+    auto slow_results = decode_slow(inference_data, model);
     vector<string> slow_pieces;
     for (auto x : slow_results.pieces) {
       slow_pieces.push_back(x);

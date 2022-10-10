@@ -9,7 +9,7 @@ from utils_for_testing import (
     TRAIN_FILE,
     BOS_ID,
     EOS_ID,
-    file_starts_with,
+    assert_file_starts_with,
     generate_artifacts,
 )
 
@@ -25,7 +25,7 @@ def test_bos_eos_reverse():
         "--bos",
     ]
     run(cmd_args, stdin=open(TEST_FILE, "r"), stdout=open("log.txt", "w"), check=True)
-    file_starts_with("log.txt", "<BOS>")
+    assert_file_starts_with("log.txt", "<BOS>")
 
     cmd_args = [
         "yttm",
@@ -37,7 +37,7 @@ def test_bos_eos_reverse():
         "--eos",
     ]
     run(cmd_args, stdin=open(TEST_FILE, "r"), stdout=open("log.txt", "w"), check=True)
-    file_starts_with("log.txt", "<EOS>")
+    assert_file_starts_with("log.txt", "<EOS>")
 
     cmd_args = [
         "yttm",
@@ -48,7 +48,7 @@ def test_bos_eos_reverse():
         "--bos",
     ]
     run(cmd_args, stdin=open(TEST_FILE, "r"), stdout=open("log.txt", "w"), check=True)
-    file_starts_with("log.txt", "2")
+    assert_file_starts_with("log.txt", "2")
 
     cmd_args = [
         "yttm",
@@ -60,7 +60,7 @@ def test_bos_eos_reverse():
         "--eos",
     ]
     run(cmd_args, stdin=open(TEST_FILE, "r"), stdout=open("log.txt", "w"), check=True)
-    file_starts_with("log.txt", "3")
+    assert_file_starts_with("log.txt", "3")
     os.remove("log.txt")
 
 
@@ -99,7 +99,7 @@ def test_renaming():
         "--n_threads=1",
     ]
     run(cmd_args, stdin=open(TEST_FILE, "r"), stdout=open("log.txt", "w"), check=True)
-    file_starts_with("log.txt", "29")
+    assert_file_starts_with("log.txt", "29")
 
     cmd_args = [
         "yttm",
@@ -111,7 +111,7 @@ def test_renaming():
         "--n_threads=1",
     ]
     run(cmd_args, stdin=open(TEST_FILE, "r"), stdout=open("log.txt", "w"), check=True)
-    file_starts_with("log.txt", "1148")
+    assert_file_starts_with("log.txt", "1148")
     os.remove("log.txt")
 
 
@@ -135,7 +135,7 @@ def test_renaming_unknown():
         check=True,
     )
 
-    file_starts_with("log.txt", "2922")
+    assert_file_starts_with("log.txt", "2922")
     os.remove("local_test.txt")
     os.remove("log.txt")
     return

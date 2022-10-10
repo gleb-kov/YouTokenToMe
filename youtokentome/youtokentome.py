@@ -1,6 +1,6 @@
 import _youtokentome_cython
 from enum import Enum
-from typing import List, Union, Optional, Collection
+from typing import Collection, List, Optional, Tuple, Union
 
 
 class OutputType(Enum):
@@ -45,12 +45,13 @@ class BPE:
 
     def encode(
         self,
-        sentences: List[str],
+        sentences: Union[str, List[str], Tuple[str]],
         output_type: OutputType = OutputType.ID,
         bos: bool = False,
         eos: bool = False,
         reverse: bool = False,
         dropout_prob: float = 0,
+        dropout_seed: Optional[int] = None,
     ) -> Union[List[List[int]], List[List[str]]]:
         if not isinstance(output_type, OutputType):
             raise TypeError(
@@ -66,6 +67,7 @@ class BPE:
             eos=eos,
             reverse=reverse,
             dropout_prob=dropout_prob,
+            dropout_seed=dropout_seed,
         )
 
     def vocab_size(self) -> int:
