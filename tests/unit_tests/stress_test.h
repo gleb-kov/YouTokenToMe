@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../../youtokentome/cpp/third_party/flat_hash_map.h"
 #include "../../youtokentome/cpp/bpe.h"
+#include "../../youtokentome/cpp/third_party/flat_hash_map.h"
 
 namespace vkcom {
 
